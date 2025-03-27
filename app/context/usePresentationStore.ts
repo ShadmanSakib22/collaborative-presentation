@@ -11,16 +11,19 @@ interface PresentationState {
   username: string;
   role: Role;
   activeSlide: string;
+
+  setUserName: (name: string) => void;
   setRole: (role: Role) => void;
-  setUsername: (name: string) => void;
   setActiveSlide: (slideId: string) => void;
 }
 
 export const usePresentationStore = create<PresentationState>((set) => ({
-  username: "Annon0",
-  role: "viewer",
+  username: "", // No default name initially
+  role: "viewer", // Default role for users
   activeSlide: "",
+
+  setUserName: (name) => set({ username: name }), // Sets the username dynamically when joining/creating a room
   setRole: (role) => set({ role }),
-  setUsername: (name) => set({ username: name }),
+  resetUser: () => set({ username: "", role: "viewer" }), // Reset username and role when user leaves or app reloads
   setActiveSlide: (slideId) => set({ activeSlide: slideId }),
 }));
