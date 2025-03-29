@@ -8,14 +8,14 @@ const inter = Inter({
 });
 
 const lora = Lora({
-  variable: "--font-merriweather",
+  variable: "--font-lora",
   subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
-  title: "TLDRAW Presentation",
+  title: "Presentation",
   description:
-    "Online Presentation App. Collaborate annonimously. Powered by TLDRAW",
+    "Online Presentation App. Collaborate annonimously. Powered by Fabric.js",
 };
 
 export default function RootLayout({
