@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { doc, onSnapshot, updateDoc, arrayRemove } from "firebase/firestore";
 import { db } from "@/app/firebase/firebaseConfig";
 import { usePresentationStore } from "@/app/context/usePresentationStore";
@@ -10,7 +10,13 @@ interface PresentationProps {
 }
 
 export default function UserList({ presentationId }: PresentationProps) {
-  const { username, users, setUsers } = usePresentationStore();
+  const {
+    username,
+    users,
+    setUsers,
+    role: currentUserRole,
+  } = usePresentationStore();
+  const [selectedUser, setSelectedUser] = useState<string | null>(null);
 
   useEffect(() => {
     const presentationRef = doc(db, "presentations", presentationId);
@@ -60,6 +66,22 @@ export default function UserList({ presentationId }: PresentationProps) {
     }
   };
 
+  const handleRoleChange = async (newRole: string) => {
+    if (!selectedUser || !presentationId) return;
+
+    const presentationRef = doc(db, "presentations", presentationId);
+    try {
+      const updatedUsers = users.map((user) =>
+        user.username === selectedUser ? { ...user, role: newRole } : user
+      );
+
+      await updateDoc(presentationRef, { users: updatedUsers });
+      setSelectedUser(null); // Clear selection after role change
+    } catch (error) {
+      console.error("Error updating user role:", error);
+    }
+  };
+
   return (
     <div className="p-2">
       <ul className="space-y-2">
@@ -69,7 +91,12 @@ export default function UserList({ presentationId }: PresentationProps) {
               key={user.username}
               className={`p-2 rounded-md ${
                 username === user.username ? "bg-accent-content" : "bg-base-200"
-              }`}
+              } ${currentUserRole === "creator" ? "cursor-pointer" : ""}`}
+              onClick={() =>
+                currentUserRole === "creator"
+                  ? setSelectedUser(user.username)
+                  : null
+              }
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center">
@@ -95,6 +122,33 @@ export default function UserList({ presentationId }: PresentationProps) {
 
       {(!users || users.length === 0) && (
         <div className="text-center py-4 text-gray-500">No users connected</div>
+      )}
+
+      {/* Role assignment options (only visible to creator) */}
+      {currentUserRole === "creator" && selectedUser && (
+        <div className="mt-4 p-4 bg-base-200 rounded-md">
+          <p className="mb-2">Assign role to {selectedUser}:</p>
+          <div className="flex space-x-2">
+            <button
+              className="px-3 py-1 bg-purple-500 text-white rounded hover:bg-purple-600"
+              onClick={() => handleRoleChange("creator")}
+            >
+              Creator
+            </button>
+            <button
+              className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+              onClick={() => handleRoleChange("editor")}
+            >
+              Editor
+            </button>
+            <button
+              className="px-3 py-1 bg-gray-500 text-white rounded hover:bg-gray-600"
+              onClick={() => handleRoleChange("viewer")}
+            >
+              Viewer
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
