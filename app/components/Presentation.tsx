@@ -1,84 +1,37 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { redirect } from "next/navigation";
 import { Canvas } from "fabric";
 import { jsPDF } from "jspdf";
+import debounce from "lodash.debounce";
 import StyleToolbar from "./StyleToolbar";
-import {
-  collection,
-  doc,
-  onSnapshot,
-  updateDoc,
-  arrayUnion,
-  arrayRemove,
-  getDoc,
-  setDoc,
-} from "firebase/firestore";
+import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { db } from "@/app/firebase/firebaseConfig";
 import { usePresentationStore } from "@/app/context/usePresentationStore";
 import UserList from "@/app/components/UserList";
 import Toolbar from "@/app/components/Toolbar";
 import SlideList from "@/app/components/SlideList";
-import { create } from "zustand";
 
 interface PresentationProps {
   presentationId: string;
 }
 
-interface Slide {
-  id: string;
-  canvasData: string;
-}
-
-interface User {
-  id: string;
-  name: string;
-  role: "creator" | "editor" | "viewer";
-}
-
-interface CanvasStore {
-  canvas: Canvas | null;
-  setCanvas: (canvas: Canvas | null) => void;
-  selectedTool: string;
-  setSelectedTool: (tool: string) => void;
-  slides: Slide[];
-  setSlides: (slides: Slide[]) => void;
-  currentSlideIndex: number;
-  setCurrentSlideIndex: (index: number) => void;
-  users: User[];
-  setUsers: (users: User[]) => void;
-}
-
-const useCanvasStore = create<CanvasStore>((set) => ({
-  canvas: null,
-  setCanvas: (canvas) => set({ canvas }),
-  selectedTool: "select",
-  setSelectedTool: (tool) => set({ selectedTool: tool }),
-  slides: [],
-  setSlides: (slides) => set({ slides }),
-  currentSlideIndex: 0,
-  setCurrentSlideIndex: (currentSlideIndex) => set({ currentSlideIndex }),
-  users: [],
-  setUsers: (users) => set({ users }),
-}));
-
 export default function Presentation({ presentationId }: PresentationProps) {
-  const { username, role, activeSlide, setActiveSlide } =
-    usePresentationStore();
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const fabricRef = useRef<Canvas | null>(null);
-
   const {
-    canvas,
+    username,
+    role,
     setCanvas,
     slides,
     setSlides,
     currentSlideIndex,
     setCurrentSlideIndex,
-    users,
     setUsers,
-  } = useCanvasStore();
+  } = usePresentationStore();
+
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fabricRef = useRef<Canvas | null>(null);
+  const isMountedRef = useRef(true);
 
   useEffect(() => {
     if (!username || !canvasRef.current) return;
@@ -90,213 +43,256 @@ export default function Presentation({ presentationId }: PresentationProps) {
         backgroundColor: "#1C232B",
         preserveObjectStacking: true,
       });
-
       setCanvas(fabricRef.current);
-
-      let copiedObjects: any[] = [];
-      document.addEventListener("keydown", (e) => {
-        if (!fabricRef.current) return;
-
-        if ((e.ctrlKey || e.metaKey) && e.key === "c") {
-          if (fabricRef.current.getActiveObjects().length > 0) {
-            fabricRef.current.getActiveObjects().forEach((obj) => {
-              obj.clone((cloned: any) => {
-                copiedObjects.push(cloned);
-              });
-            });
-          }
-        }
-
-        if ((e.ctrlKey || e.metaKey) && e.key === "v") {
-          if (copiedObjects.length > 0) {
-            copiedObjects.forEach((obj) => {
-              obj.clone((cloned: any) => {
-                cloned.set({
-                  left: cloned.left + 10,
-                  top: cloned.top + 10,
-                  evented: true,
-                });
-                fabricRef.current?.add(cloned);
-              });
-            });
-            fabricRef.current.renderAll();
-            saveCanvasState();
-          }
-        }
-      });
     }
 
-    const presentationRef = doc(db, "presentations", presentationId);
-
-    const initializePresentation = async () => {
-      const docSnap = await getDoc(presentationRef);
-
-      if (!docSnap.exists()) {
-        await setDoc(presentationRef, {
-          users: [
-            {
-              id: Date.now().toString(),
-              name: username,
-              role: role,
-            },
-          ],
-          slides: [
-            {
-              id: "slide1",
-              canvasData: JSON.stringify({
-                version: "5.3.0",
-                objects: [],
-              }),
-            },
-          ],
-        });
-      } else {
-        const data = docSnap.data();
-        const userExists = data.users.some(
-          (user: User) => user.name === username
-        );
-
-        if (!userExists) {
-          await updateDoc(presentationRef, {
-            users: arrayUnion({
-              id: Date.now().toString(),
-              name: username,
-              role: role,
-            }),
-          });
-        }
-      }
-    };
-
-    initializePresentation();
-
-    const unsubscribe = onSnapshot(presentationRef, (doc) => {
-      if (doc.exists()) {
-        const data = doc.data();
-        setSlides(data.slides || []);
-        setUsers(data.users || []);
-
-        if (data.slides && data.slides.length > 0) {
-          if (!activeSlide) {
-            setActiveSlide(data.slides[0].id);
-          }
-
-          const activeIndex = data.slides.findIndex(
-            (slide: Slide) => slide.id === activeSlide
-          );
-          if (activeIndex !== -1) {
-            setCurrentSlideIndex(activeIndex);
-
-            if (fabricRef.current) {
-              fabricRef.current.clear();
-              fabricRef.current.loadFromJSON(
-                data.slides[activeIndex].canvasData,
-                fabricRef.current.renderAll.bind(fabricRef.current)
-              );
-            }
-          }
-        }
-      }
-    });
-
     return () => {
-      unsubscribe();
+      isMountedRef.current = false;
       if (fabricRef.current) {
         fabricRef.current.dispose();
         fabricRef.current = null;
         setCanvas(null);
       }
     };
-  }, [username]);
+  }, [username, setCanvas]);
 
-  const saveCanvasState = async () => {
-    if (!fabricRef.current || slides.length === 0) return;
+  useEffect(() => {
+    if (!presentationId || !username) return;
 
     const presentationRef = doc(db, "presentations", presentationId);
-    const updatedSlides = [...slides];
-    updatedSlides[currentSlideIndex] = {
-      ...updatedSlides[currentSlideIndex],
-      canvasData: JSON.stringify(fabricRef.current.toJSON()),
-    };
 
-    await updateDoc(presentationRef, {
+    const unsubscribe = onSnapshot(presentationRef, (doc) => {
+      if (!doc.exists() || !isMountedRef.current) return;
+
+      const data = doc.data();
+      const currentUsers = data.users || [];
+      setUsers(currentUsers);
+      setSlides(data.slides || []);
+
+      const currentSlideData = data.slides[currentSlideIndex]?.canvasData;
+      if (currentSlideData && fabricRef.current) {
+        // Clear the canvas first
+        fabricRef.current.clear();
+
+        fabricRef.current.loadFromJSON(currentSlideData, () => {
+          // Force a complete re-render
+          fabricRef.current?.requestRenderAll();
+
+          // Make sure all objects are properly initialized
+          fabricRef.current?.getObjects().forEach((obj) => {
+            obj.setCoords();
+          });
+
+          // Force another render to be safe
+          setTimeout(() => {
+            fabricRef.current?.requestRenderAll();
+          }, 50);
+        });
+      }
+    });
+
+    return () => unsubscribe();
+  }, [
+    presentationId,
+    username,
+    currentSlideIndex,
+    setCurrentSlideIndex,
+    setSlides,
+    setUsers,
+  ]);
+
+  const debouncedSave = useRef(
+    debounce(async (canvasData: string) => {
+      if (!isMountedRef.current || !presentationId) return;
+
+      try {
+        // Create a deep copy to avoid reference issues
+        const updatedSlides = JSON.parse(JSON.stringify(slides));
+
+        // Update only the current slide
+        updatedSlides[currentSlideIndex] = {
+          ...updatedSlides[currentSlideIndex],
+          canvasData,
+        };
+
+        await updateDoc(doc(db, "presentations", presentationId), {
+          slides: updatedSlides,
+          lastEdited: new Date(),
+        });
+
+        setSlides(updatedSlides);
+      } catch (error) {
+        console.error("Failed to save canvas state:", error);
+      }
+    }, 500)
+  ).current;
+
+  // Add this function to force a save
+  const forceSaveCanvas = () => {
+    if (!fabricRef.current) return;
+    const canvasData = JSON.stringify(fabricRef.current.toJSON());
+
+    // Save immediately without debouncing
+    const updatedSlides = slides.map((slide, index) =>
+      index === currentSlideIndex ? { ...slide, canvasData } : slide
+    );
+
+    updateDoc(doc(db, "presentations", presentationId), {
       slides: updatedSlides,
+      lastEdited: new Date(),
+    }).catch((error) => {
+      console.error("Failed to force save canvas state:", error);
     });
   };
+
+  useEffect(() => {
+    if (!fabricRef.current || role === "viewer") return;
+
+    const handleCanvasChange = () => {
+      if (!fabricRef.current) return;
+      console.log("Canvas changed, saving...");
+      const canvasData = JSON.stringify(fabricRef.current.toJSON());
+      console.log("Canvas data:", canvasData); // Debug log
+      debouncedSave(canvasData);
+    };
+
+    fabricRef.current.on("object:modified", handleCanvasChange);
+    fabricRef.current.on("object:added", handleCanvasChange);
+    fabricRef.current.on("object:removed", handleCanvasChange);
+    fabricRef.current.on("path:created", handleCanvasChange);
+
+    return () => {
+      if (!fabricRef.current) return;
+      fabricRef.current.off("object:modified", handleCanvasChange);
+      fabricRef.current.off("object:added", handleCanvasChange);
+      fabricRef.current.off("object:removed", handleCanvasChange);
+      fabricRef.current.off("path:created", handleCanvasChange);
+      debouncedSave.cancel();
+    };
+  }, [currentSlideIndex, debouncedSave, role]);
 
   const addSlide = async () => {
     if (role === "viewer") return;
 
-    const presentationRef = doc(db, "presentations", presentationId);
-    const newSlideId = `slide${slides.length + 1}`;
     const newSlide = {
-      id: newSlideId,
-      canvasData: JSON.stringify({
-        version: "5.3.0",
-        objects: [],
-      }),
+      canvasData: JSON.stringify({ version: "6.6.1", objects: [] }),
     };
 
-    await updateDoc(presentationRef, {
-      slides: arrayUnion(newSlide),
+    const updatedSlides = [...slides, newSlide];
+
+    // Await the updateDoc call to ensure the slide is saved to Firestore
+    await updateDoc(doc(db, "presentations", presentationId), {
+      slides: updatedSlides,
+      lastEdited: new Date(),
     });
 
-    setActiveSlide(newSlideId);
+    setSlides(updatedSlides);
+    setCurrentSlideIndex(updatedSlides.length - 1);
+
+    // Load empty canvas for new slide
+    if (fabricRef.current) {
+      fabricRef.current.loadFromJSON(newSlide.canvasData, () => {
+        fabricRef.current?.renderAll();
+      });
+    }
   };
 
   const removeSlide = async () => {
     if (role === "viewer" || slides.length <= 1) return;
 
-    const presentationRef = doc(db, "presentations", presentationId);
-    const slideToRemove = slides[currentSlideIndex];
+    // Remove current slide from slides array
+    const updatedSlides = slides.filter(
+      (_, index) => index !== currentSlideIndex
+    );
+    const newIndex = currentSlideIndex > 0 ? currentSlideIndex - 1 : 0;
 
-    await updateDoc(presentationRef, {
-      slides: arrayRemove(slideToRemove),
+    // First update Firestore with the new slides array
+    await updateDoc(doc(db, "presentations", presentationId), {
+      slides: updatedSlides,
+      lastEdited: new Date(),
     });
 
-    const newIndex = currentSlideIndex > 0 ? currentSlideIndex - 1 : 0;
-    if (slides.length > 1) {
-      setActiveSlide(
-        slides[newIndex === currentSlideIndex ? newIndex + 1 : newIndex].id
-      );
+    // Update local state
+    setSlides(updatedSlides);
+    setCurrentSlideIndex(newIndex);
+
+    // Load the previous slide content
+    if (fabricRef.current) {
+      fabricRef.current.loadFromJSON(updatedSlides[newIndex].canvasData, () => {
+        fabricRef.current?.renderAll();
+      });
+    }
+  };
+
+  const switchSlide = async (index: number) => {
+    if (!fabricRef.current || index === currentSlideIndex) return;
+
+    // For viewers, just switch the slide without saving changes
+    if (role === "viewer") {
+      setCurrentSlideIndex(index);
+      fabricRef.current.clear();
+      fabricRef.current.loadFromJSON(slides[index].canvasData, () => {
+        fabricRef.current?.requestRenderAll();
+      });
+      return;
+    }
+
+    // For editors and creators, save changes before switching
+    try {
+      // Save current canvas state
+      const currentCanvasData = JSON.stringify(fabricRef.current.toJSON());
+
+      // Deep copy the slides array
+      const updatedSlides = JSON.parse(JSON.stringify(slides));
+
+      // Update the current slide's canvas data
+      updatedSlides[currentSlideIndex] = {
+        ...updatedSlides[currentSlideIndex],
+        canvasData: currentCanvasData,
+      };
+
+      // Update Firestore
+      await updateDoc(doc(db, "presentations", presentationId), {
+        slides: updatedSlides,
+        lastEdited: new Date(),
+      });
+
+      // Update local state
+      setSlides(updatedSlides);
+
+      // Switch to the new slide
+      setCurrentSlideIndex(index);
+
+      // Load the new slide's canvas data
+      fabricRef.current.clear();
+      fabricRef.current.loadFromJSON(slides[index].canvasData, () => {
+        fabricRef.current?.requestRenderAll();
+      });
+    } catch (error) {
+      console.error("Failed to switch slides:", error);
     }
   };
 
   const exportToPdf = () => {
-    console.log(slides.length);
-    if (slides.length === 0) return;
+    const canvas = document.querySelector("canvas");
 
-    const pdf = new jsPDF({
+    if (!canvas) return;
+
+    // use jspdf
+    const doc = new jsPDF({
       orientation: "landscape",
       unit: "px",
       format: [1024, 768],
     });
 
-    slides.forEach((slide, index) => {
-      if (index > 0) {
-        pdf.addPage();
-      }
+    // get the canvas data url
+    const data = canvas.toDataURL();
 
-      const tempCanvas = document.createElement("canvas");
-      tempCanvas.width = 1024;
-      tempCanvas.height = 768;
-      const tempFabricCanvas = new Canvas(tempCanvas);
+    // add the image to the pdf
+    doc.addImage(data, "PNG", 0, 0, canvas.width, canvas.height);
 
-      tempFabricCanvas.loadFromJSON(slide.canvasData, () => {
-        const dataUrl = tempFabricCanvas.toDataURL({
-          format: "png",
-          quality: 1,
-        });
-
-        pdf.addImage(dataUrl, "PNG", 0, 0, 1024, 768);
-
-        if (index === slides.length - 1) {
-          pdf.save(`presentation-${presentationId}.pdf`);
-        }
-
-        tempFabricCanvas.dispose();
-      });
-    });
+    // download the pdf
+    doc.save("canvas.pdf");
   };
 
   if (!username) {
@@ -311,20 +307,22 @@ export default function Presentation({ presentationId }: PresentationProps) {
             SLIDES
           </h2>
           <SlideList
-            slides={slides}
-            currentSlideIndex={currentSlideIndex}
-            onSlideSelect={(slideId) => setActiveSlide(slideId)}
+            presentationId={presentationId}
+            onSlideSelect={switchSlide}
             onAddSlide={addSlide}
             onRemoveSlide={removeSlide}
-            userRole={role}
           />
         </div>
-        <div className="p-4 border-t-4 border-accent-content">
-          <h2 className="font-semibold bg-accent-content p-2 text-center mb-4 uppercase">
-            Styles
-          </h2>
-          <StyleToolbar canvas={fabricRef.current} userRole={role} />
-        </div>
+
+        {/* Only show style toolbar to non-viewers */}
+        {role !== "viewer" && (
+          <div className="p-4 border-t-4 border-accent-content">
+            <h2 className="font-semibold bg-accent-content p-2 text-center mb-4 uppercase">
+              Styles
+            </h2>
+            <StyleToolbar canvas={fabricRef.current} userRole={role} />
+          </div>
+        )}
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center relative bg-base-200">
@@ -336,8 +334,8 @@ export default function Presentation({ presentationId }: PresentationProps) {
           <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 z-10">
             <Toolbar
               canvas={fabricRef.current}
-              onSave={saveCanvasState}
-              onExport={exportToPdf}
+              onSave={forceSaveCanvas}
+              onExport={() => exportToPdf()}
               userRole={role}
             />
           </div>
@@ -348,7 +346,7 @@ export default function Presentation({ presentationId }: PresentationProps) {
         <h2 className="font-semibold bg-accent-content p-2 text-center">
           USERS
         </h2>
-        <UserList presentationId={presentationId} users={users} />
+        <UserList presentationId={presentationId} />
       </div>
     </div>
   );

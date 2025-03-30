@@ -28,30 +28,30 @@ export default function Home() {
     fetchPresentations();
   }, []);
 
-  // Function to create a new presentation
   const createPresentation = async () => {
     const docRef = await addDoc(collection(db, "presentations"), {
       name: `New Presentation`,
       createdAt: new Date(),
       lastEdited: new Date(),
-      slides: [],
-      activeSlide: "",
+      slides: [
+        {
+          canvasData: JSON.stringify({ version: "6.6.1", objects: [] }),
+        },
+      ],
       users: [
         {
-          name: "Annon0", // Default Creator name
-          role: "creator", // Creator role
+          username: "Annon",
+          role: "creator",
         },
       ],
     });
-    // update zustand state:
-    usePresentationStore.getState().setUserName("Annon0");
+
+    usePresentationStore.getState().setUsername("Annon");
     usePresentationStore.getState().setRole("creator");
 
-    // Redirect to the new presentation
     router.push(`/presentation/${docRef.id}`);
   };
 
-  // Function for a new user to join a presentation
   const joinPresentation = async (presentationId: string) => {
     const docRef = doc(db, "presentations", presentationId);
     const docSnap = await getDoc(docRef);
@@ -60,19 +60,20 @@ export default function Home() {
 
     const data = docSnap.data();
     const users = data.users || [];
-
-    // set default name and role for the new user
     const userName = `Annon${users.length + 1}`;
-    const newUser = { name: userName, role: "viewer" };
 
-    // Update Firestore document with the new user
-    await updateDoc(docRef, { users: [...users, newUser] });
+    const newUser = {
+      username: userName,
+      role: "viewer",
+    };
 
-    // update zustand state:
-    usePresentationStore.getState().setUserName(userName);
+    await updateDoc(docRef, {
+      users: [...users, newUser],
+    });
+
+    usePresentationStore.getState().setUsername(userName);
     usePresentationStore.getState().setRole("viewer");
 
-    // Redirect to the joined presentation
     router.push(`/presentation/${presentationId}`);
   };
 
@@ -86,16 +87,16 @@ export default function Home() {
           placeholder="Search presentations..."
           onChange={(e) => setSearch(e.target.value)}
         />
-        <button className="btn btn-primary" onClick={createPresentation}>
+        <button className="btn btn-accent" onClick={createPresentation}>
           Create Presentation
         </button>
       </div>
 
-      <table className="table mt-4">
+      <table className="table table-zebra mt-4">
         <thead>
           <tr>
             <th>ID</th>
-            <th>Name</th>
+            {/* <th>Name</th> */}
             <th>Created Date</th>
             <th>Last Edited</th>
             <th>Action</th>
@@ -103,11 +104,11 @@ export default function Home() {
         </thead>
         <tbody>
           {presentations
-            .filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
+            .filter((p) => p.id.toLowerCase().includes(search.toLowerCase()))
             .map((p) => (
               <tr key={p.id}>
                 <td>{p.id}</td>
-                <td>{p.name}</td>
+                {/* <td>{p.name}</td> */}
                 <td>
                   {new Date(p.createdAt.seconds * 1000).toLocaleDateString()}
                 </td>
@@ -116,7 +117,7 @@ export default function Home() {
                 </td>
                 <td>
                   <button
-                    className="btn btn-secondary"
+                    className="btn bg-accent-content hover:bg-accent"
                     onClick={() => joinPresentation(p.id)}
                   >
                     Join

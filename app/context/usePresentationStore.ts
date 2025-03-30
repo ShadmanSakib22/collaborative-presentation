@@ -1,29 +1,59 @@
-/* 
-src: app\context\usePresentationStore.ts
-purpose: Zustand store for user roles & active slide
-*/
-
 import { create } from "zustand";
+import { Canvas } from "fabric";
 
-type Role = "creator" | "editor" | "viewer";
-
-interface PresentationState {
-  username: string;
-  role: Role;
-  activeSlide: string;
-
-  setUserName: (name: string) => void;
-  setRole: (role: Role) => void;
-  setActiveSlide: (slideId: string) => void;
+interface Slide {
+  canvasData: string;
 }
 
-export const usePresentationStore = create<PresentationState>((set) => ({
-  username: "", // No default name initially
-  role: "viewer", // Default role for users
-  activeSlide: "",
+interface User {
+  username: string;
+  role: "creator" | "editor" | "viewer";
+}
 
-  setUserName: (name) => set({ username: name }), // Sets the username dynamically when joining/creating a room
+interface Slide {
+  canvasData: string;
+}
+
+interface PresentationStore {
+  // Canvas State
+  canvas: Canvas | null;
+  selectedTool: string;
+  currentSlideIndex: number;
+  slides: Slide[];
+  users: User[];
+
+  // User State
+  username: string;
+  role: "creator" | "editor" | "viewer";
+
+  // Actions
+  setCanvas: (canvas: Canvas | null) => void;
+  setSelectedTool: (tool: string) => void;
+  setSlides: (slides: Slide[]) => void;
+  setCurrentSlideIndex: (index: number) => void;
+  setUsers: (users: User[]) => void;
+  setUsername: (username: string) => void;
+  setRole: (role: "creator" | "editor" | "viewer") => void;
+}
+
+export const usePresentationStore = create<PresentationStore>((set) => ({
+  // Canvas State
+  canvas: null,
+  selectedTool: "select",
+  currentSlideIndex: 0,
+  slides: [],
+  users: [],
+
+  // User State
+  username: "",
+  role: "viewer",
+
+  // Actions
+  setCanvas: (canvas) => set({ canvas }),
+  setSelectedTool: (tool) => set({ selectedTool: tool }),
+  setSlides: (slides) => set({ slides }),
+  setCurrentSlideIndex: (index) => set({ currentSlideIndex: index }),
+  setUsers: (users) => set({ users }),
+  setUsername: (username) => set({ username: username }),
   setRole: (role) => set({ role }),
-  resetUser: () => set({ username: "", role: "viewer" }), // Reset username and role when user leaves or app reloads
-  setActiveSlide: (slideId) => set({ activeSlide: slideId }),
 }));
